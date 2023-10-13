@@ -4,11 +4,23 @@
 In this paper, I propose an image generative model by reversing the wave equation. 
 I am investigating this because the previous works stated above show a very clear trend that physics based equations have a promising generative modeling counterpart.
 First, a general solution to the wave equation is of the following form:
+
 ![solution to the wave equation](./gifs/wave_sol_eq.png)
+
 where exp is the exponential function, A is any complex number, and ω, kx, and ky are three numbers such that ω = f(kx,ky). The number ω is called the angular frequency of the wave, and the vector k = (kx,ky) its wave vector. This relation between the angular frequency and wave vector is called the dispersion relation. It can be used to infer some important properties of the waves like the speed at which the information and energy it carries propagate.
 Additionally, if we add -iγ|k| to the angular frequency, it functions as a dissipative component, which works by removing energy from the wave thereby decaying it.
 
 The idea is to use this equation to propagate any image forward in time which will lead it to a prior distribution. Then the neural network can reverse the flow, essentially exhibiting a generative process by reversing any randomly drawn image from the said prior.
+
+## Results
+Forward Process
+
+![Forward Process](./gifs/forward.gif)
+
+-------------------------------------------------------------
+Reverse Process
+
+![Forward Process](./gifs/reverse.gif)
 
 ## Challenges:
 As is evident from the simulation attached above, the images propagate towards a non-trivial prior distribution.
