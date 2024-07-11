@@ -1,7 +1,7 @@
 # Inverse-Wave-Equation
 
 ## Research Methodology:
-In this paper, I propose an image generative model by reversing the wave equation. 
+In this work, I propose an image generative model by reversing the wave equation. 
 I am investigating this because the previous works stated above show a very clear trend that physics based equations have a promising generative modeling counterpart.
 First, a general solution to the wave equation is of the following form:
 
