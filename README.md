@@ -13,7 +13,7 @@ Additionally, if we add -iγ|k| to the angular frequency, it functions as a diss
 
 The idea is to use this equation to propagate any image forward in time which will lead it to a prior distribution. Then the neural network can reverse the flow, essentially exhibiting a generative process by reversing any randomly drawn image from the said prior.
 
-## Results
+## Procedure
 Forward Process
 
 ![Forward Process](./gifs/forward.gif)
@@ -21,11 +21,26 @@ Forward Process
 -------------------------------------------------------------
 Reverse Process
 
-![Forward Process](./gifs/reverse.gif)
+![Reverse Process](./gifs/reverse.gif)
 
-## Challenges:
-As is evident from the simulation attached above, the images propagate towards a non-trivial prior distribution.
-One reason is that I have not used any dissipative components in the wave propagation. If used, it will remove high frequency components and would result in a better prior as the image evolves. That remains to be tested.
+-------------------------------------------------------------
+
+Model Definition
+
+![Model Definition](./gifs/model_definition.png)
+
+## Results
+
+<img src="./gifs/process1.gif" width="250" height="250"/>
+<img src="./gifs/process2.gif" width="250" height="250"/>
+<img src="./gifs/process3.gif" width="250" height="250"/>
+
+## Interpolation
+
+<img src="./gifs/process4_9.gif" width="250" height="250"/>
+
+<img src="./gifs/process135.gif" width="250" height="250"/>
+
 
 ## References: 
 1. Inverse Heat Equation (https://arxiv.org/pdf/2206.13397.pdf)
