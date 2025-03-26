@@ -25,7 +25,7 @@ Reverse Process
 
 -------------------------------------------------------------
 
-Model Definition
+## Model Definition
 
 ![Model Definition](./gifs/model_definition.png)
 
