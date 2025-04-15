@@ -5,31 +5,54 @@ import logging
 import numpy as np
 from model_code.unet import UNetModel
 from model_code import torch_dct
+from model_code.triton_kernels import wave_equation_triton
+import cuda_kernels  # Import the CUDA extension
 
 class DCTBlur_orig(nn.Module):
 
     def __init__(self, blur_sigmas, image_size, device):
-        super(DCTBlur, self).__init__()
-        self.blur_sigmas = torch.tensor(blur_sigmas).to(device)
-        freqs = np.pi*torch.linspace(0, image_size-1,
-                                     image_size).to(device)/image_size
+        super(DCTBlur_orig, self).__init__()
+        # Ensure blur_sigmas is a tensor and convert to float32
+        self.blur_sigmas = torch.tensor(blur_sigmas, dtype=torch.float32).to(device)
+        # Create frequencies with proper dtype
+        freqs = np.pi*torch.linspace(0, image_size-1, image_size, dtype=torch.float32).to(device)/image_size
         self.frequencies_squared = freqs[:, None]**2 + freqs[None, :]**2
 
     def forward(self, x, fwd_steps):
+        # Convert fwd_steps to long tensor if it's not already
+        if isinstance(fwd_steps, (int, float)):
+            fwd_steps = torch.tensor([fwd_steps], device=x.device).long()
+        elif isinstance(fwd_steps, list):
+            fwd_steps = torch.tensor(fwd_steps, device=x.device).long()
+        elif not fwd_steps.dtype == torch.long:
+            fwd_steps = fwd_steps.long()
+            
+        # Ensure x is float32
+        x = x.to(dtype=torch.float32)
+            
         if len(x.shape) == 4:
             sigmas = self.blur_sigmas[fwd_steps][:, None, None, None]
         elif len(x.shape) == 3:
             sigmas = self.blur_sigmas[fwd_steps][:, None, None]
         t = sigmas**2/2
+        
+        # Apply DCT and ensure float32
         dct_coefs = torch_dct.dct_2d(x, norm='ortho')
-        dct_coefs = dct_coefs * torch.exp(- self.frequencies_squared * t)
-        return torch_dct.idct_2d(dct_coefs, norm='ortho')
+        dct_coefs = dct_coefs.to(dtype=torch.float32)
+        
+        # Apply exponential with proper broadcasting
+        exp_term = torch.exp(- self.frequencies_squared * t)
+        dct_coefs = dct_coefs * exp_term
+        
+        # Apply inverse DCT
+        return torch_dct.idct_2d(dct_coefs, norm='ortho').real
 
 class DCTBlur(nn.Module):
 
     def __init__(self, blur_sigmas, image_size, device):
         super(DCTBlur, self).__init__()
-        self.blur_sigmas = torch.tensor(blur_sigmas).to(device)
+        # Ensure blur_sigmas is a tensor and convert to float32
+        self.blur_sigmas = torch.tensor(blur_sigmas, dtype=torch.float32).to(device)
 
         Nx, Ny = image_size, image_size
         dx = dy = 0.5
@@ -37,24 +60,59 @@ class DCTBlur(nn.Module):
         c = 5
         lamda = 0.5
         gamma = 0.8
+        
+        # Create wave number arrays with proper dtype
         kx = np.array([[np.pi * ((i + Nx // 2) % Nx - Nx // 2) / (Nx * dx)
-                        for j in range(Ny)] for i in range(Nx)])
+                        for j in range(Ny)] for i in range(Nx)], dtype=np.float32)
         ky = np.array([[np.pi * ((j + Ny // 2) % Ny - Ny // 2) / (Ny * dy)
-                        for j in range(Ny)] for i in range(Nx)])
-
-        dispersion = np.sqrt(mass ** 2 + c ** 2 * (kx ** 2 + ky ** 2) + lamda * (kx ** 2 + ky ** 2) ** 2)
-        dissipation = mass + 1j * gamma * np.sqrt(kx ** 2 + ky ** 2)
-
-        self.frequencies_squared = torch.tensor(dispersion - dissipation).to(device)
+                        for j in range(Ny)] for i in range(Nx)], dtype=np.float32)
+        
+        # Store wave numbers as tensors with proper dtype
+        self.kx = torch.tensor(kx, dtype=torch.float32, device=device)
+        self.ky = torch.tensor(ky, dtype=torch.float32, device=device)
+        
+        # Store physical parameters as tensors on device
+        self.mass = torch.tensor(mass, dtype=torch.float32, device=device)
+        self.c = torch.tensor(c, dtype=torch.float32, device=device)
+        self.lamda = torch.tensor(lamda, dtype=torch.float32, device=device)
+        self.gamma = torch.tensor(gamma, dtype=torch.float32, device=device)
 
     def forward(self, x, fwd_steps):
+        # Convert fwd_steps to long tensor if it's not already
+        if isinstance(fwd_steps, (int, float)):
+            fwd_steps = torch.tensor([fwd_steps], device=x.device).long()
+        elif isinstance(fwd_steps, list):
+            fwd_steps = torch.tensor(fwd_steps, device=x.device).long()
+        elif not fwd_steps.dtype == torch.long:
+            fwd_steps = fwd_steps.long()
+            
+        # Ensure x is float32 and on correct device
+        x = x.to(dtype=torch.float32, device=self.kx.device)
+            
         if len(x.shape) == 4:
             sigmas = self.blur_sigmas[fwd_steps][:, None, None, None]
         elif len(x.shape) == 3:
             sigmas = self.blur_sigmas[fwd_steps][:, None, None]
         t = sigmas**2/2
+        
+        # Apply DCT and ensure float32
         dct_coefs = torch_dct.dct_2d(x, norm='ortho')
-        dct_coefs = dct_coefs * torch.exp(-1j * self.frequencies_squared * t)
+        dct_coefs = dct_coefs.to(dtype=torch.float32)
+        
+        # Apply wave equation using CUDA
+        # Ensure all tensors are on the same device and have correct dtype
+        dct_coefs = cuda_kernels.wave_equation_cuda(
+            dct_coefs.real,
+            self.kx,
+            self.ky,
+            t.to(dtype=torch.float32),
+            self.mass,
+            self.c,
+            self.lamda,
+            self.gamma
+        )
+        
+        # Apply inverse DCT
         return torch_dct.idct_2d(dct_coefs, norm='ortho').real
 
 
