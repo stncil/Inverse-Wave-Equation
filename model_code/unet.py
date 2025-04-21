@@ -20,7 +20,7 @@ from .nn import (
     normalization,
     timestep_embedding,
 )
-
+from ndlinear import NdLinear
 
 class AttentionPool2d(nn.Module):
     """
@@ -176,7 +176,8 @@ class ResBlock(TimestepBlock):
         use_checkpoint=False,
         up=False,
         down=False,
-        padding_mode='zeros'
+        padding_mode='zeros',
+        use_ndlinear=False
     ):
         super().__init__()
         self.channels = channels
@@ -186,6 +187,7 @@ class ResBlock(TimestepBlock):
         self.use_conv = use_conv
         self.use_checkpoint = use_checkpoint
         self.use_scale_shift_norm = use_scale_shift_norm
+        self.use_ndlinear = use_ndlinear
 
         self.in_layers = nn.Sequential(
             normalization(channels),
@@ -207,11 +209,12 @@ class ResBlock(TimestepBlock):
 
         self.emb_layers = nn.Sequential(
             nn.SiLU(),
-            linear(
-                emb_channels,
-                2 * self.out_channels if use_scale_shift_norm else self.out_channels,
+            NdLinear(
+                (emb_channels,),
+                (2 * self.out_channels if use_scale_shift_norm else self.out_channels,)
             ),
         )
+
         self.out_layers = nn.Sequential(
             normalization(self.out_channels),
             nn.SiLU(),
@@ -282,7 +285,8 @@ class AttentionBlock(nn.Module):
         num_head_channels=-1,
         use_checkpoint=False,
         use_new_attention_order=False,
-        padding_mode='zeros'
+        padding_mode='zeros',
+        use_ndlinear=False
     ):
         super().__init__()
         self.channels = channels
@@ -295,17 +299,30 @@ class AttentionBlock(nn.Module):
             self.num_heads = channels // num_head_channels
         self.use_checkpoint = use_checkpoint
         self.norm = normalization(channels)
-        self.qkv = conv_nd(1, channels, channels * 3,
-                           1, padding_mode=padding_mode)
+        
+        if use_ndlinear:
+            # Use NdLinear for QKV projection
+            self.qkv = NdLinear(
+                input_dims=(channels,),
+                hidden_size=(channels * 3,)
+            )
+            self.proj_out = zero_module(
+                NdLinear(
+                    input_dims=(channels,),
+                    hidden_size=(channels,)
+                )
+            )
+        else:
+            # Original implementation
+            self.qkv = conv_nd(1, channels, channels * 3, 1, padding_mode=padding_mode)
+            self.proj_out = zero_module(
+                conv_nd(1, channels, channels, 1, padding_mode=padding_mode)
+            )
+        
         if use_new_attention_order:
-            # split qkv before split heads
             self.attention = QKVAttention(self.num_heads)
         else:
-            # split heads before split qkv
             self.attention = QKVAttentionLegacy(self.num_heads)
-
-        self.proj_out = zero_module(
-            conv_nd(1, channels, channels, 1, padding_mode=padding_mode))
 
     def forward(self, x):
         return checkpoint(self._forward, (x,), self.parameters(), True)
@@ -472,9 +489,9 @@ class UNetModel(nn.Module):
         self.padding_mode = 'zeros'
         time_embed_dim = model_channels * 4
         self.time_embed = nn.Sequential(
-            linear(self.model_channels, time_embed_dim),
+            NdLinear((model_channels,), (time_embed_dim,)),
             nn.SiLU(),
-            linear(time_embed_dim, time_embed_dim),
+            NdLinear((time_embed_dim,), (time_embed_dim,)),
         )
 
         if self.num_classes is not None:
@@ -487,7 +504,7 @@ class UNetModel(nn.Module):
         )
         self._feature_size = ch
         input_block_chans = [ch]
-        ds = 0  # Counter for selecting the levels where attention is applied
+        ds = 0
         for level, mult in enumerate(channel_mult):
             for _ in range(num_res_blocks):
                 layers = [
@@ -499,7 +516,8 @@ class UNetModel(nn.Module):
                         dims=dims,
                         use_checkpoint=use_checkpoint,
                         use_scale_shift_norm=use_scale_shift_norm,
-                        padding_mode=self.padding_mode
+                        padding_mode=self.padding_mode,
+                        use_ndlinear=True
                     )
                 ]
                 ch = int(mult * model_channels)
@@ -511,7 +529,8 @@ class UNetModel(nn.Module):
                             num_heads=num_heads,
                             num_head_channels=num_head_channels,
                             use_new_attention_order=use_new_attention_order,
-                            padding_mode=self.padding_mode
+                            padding_mode=self.padding_mode,
+                            use_ndlinear=True
                         )
                     )
                 self.input_blocks.append(TimestepEmbedSequential(*layers))
